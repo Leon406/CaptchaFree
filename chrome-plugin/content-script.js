@@ -1,6 +1,10 @@
 let last_time = 0
 const INTERVAL = 2000
 let DEBUG = false
+// 避免多次查询,提升性能
+let found_captcha_img
+let found_captcha_input
+let exist_toast
 
 // 监听 background 传来的数据 可对页面dom操作
 chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
@@ -17,17 +21,17 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
             toast(data.data.message)
             break;
         case "base64":
-            let img = find_captcha_image(data.data.srcUrl) || getImgFromIFrame(data.data.srcUrl);
-            DEBUG && console.log("gotcha img ", img)
-            if (!img) {
-                toast("图片解析错误")
+            found_captcha_img = found_captcha_img || find_captcha_image(data.data.srcUrl) || find_captcha_image_from_iframe(data.data.srcUrl);
+            DEBUG && console.log("gotcha img ", found_captcha_img)
+            if (!found_captcha_img) {
+                toast("未找到验证码图片!!!")
                 return
             }
             // 限制验证码图片高度, 防止滥用
-            if (img.height > 200) {
+            if (found_captcha_img.height > 200) {
                 toast("你确定这是验证码?")
             } else {
-                sendResponse(drawBase64Image(img));
+                sendResponse(drawBase64Image(found_captcha_img));
             }
             break;
         case "rule":
@@ -47,7 +51,6 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
     }
 });
 
-
 chrome.storage.sync.get({"rule": ""})
     .then(config => {
         parse_config(config.rule)
@@ -63,30 +66,43 @@ function debounce(interval = INTERVAL) {
     return false
 }
 
-function copy(str, mimeType) {
+function get_captcha_input(text) {
     let config = fill_config[location.host];
     if (config) {
-        DEBUG && console.log("自动填充", "找到规则", config.selector)
+        DEBUG && console.info("==fill==", "找到规则@@@", config.selector)
         let ele = find_element(config.selector)
         if (ele) {
-            DEBUG && console.log("自动填充", "找到节点并填写", ele)
-            ele.focus();
-            ele.value = str
-            // vue 双向绑定更新数据
-            ele.dispatchEvent(new Event("input"))
+            DEBUG && console.info("==fill==", "找到节点并填写!!!", ele)
+            fill_input(ele, text);
         } else {
-            DEBUG && console.log("自动填充", "规则失效,尝试寻找填写位置")
-            auto_detect_and_fill(str)
+            DEBUG && console.warn("==fill==", "规则失效,尝试寻找填写位置")
+            auto_detect_and_fill_captcha(text)
         }
     } else {
-        DEBUG && console.log("自动填充", "未找到规则, 尝试寻找填写位置")
-        auto_detect_and_fill(str)
+        DEBUG && console.warn("==fill==", "未找到规则, 尝试寻找填写位置")
+        auto_detect_and_fill_captcha(text)
     }
+}
+
+function copy(text, mimeType) {
+    if (found_captcha_input) {
+        console.log("=======>", "got input");
+        fill_input(found_captcha_input, text)
+    } else {
+        get_captcha_input(text);
+    }
+
     document.oncopy = function (event) {
-        event.clipboardData.setData(mimeType, str);
+        event.clipboardData.setData(mimeType, text);
         event.preventDefault();
     };
-    document.execCommand("copy", false, str);
+    document.execCommand("copy", false, text);
+}
+
+function fill_input(input, text) {
+    input.focus();
+    input.value = text
+    input.dispatchEvent(new Event("input")) // vue 双向绑定更新数据
 }
 
 function input_condition(el) {
@@ -100,21 +116,21 @@ function input_condition(el) {
     )
 }
 
-function auto_detect_and_fill(code) {
-    let verification_code_ele = Array.from(document.querySelectorAll("input")).filter(input_condition)[0];
-    console.log("from iframe 11", verification_code_ele);
-    if (!verification_code_ele || verification_code_ele.length === 0) {
-        verification_code_ele = get_element_from_iframe(input_condition)
-        console.log("from iframe 22", verification_code_ele);
+function auto_detect_and_fill_captcha(captcha) {
+    if (found_captcha_input) {
+        DEBUG && console.log("==auto_detect", "got input!!!");
+        fill_input(found_captcha_input, captcha)
+        return
     }
-    if (verification_code_ele) {
-        verification_code_ele.value = code
-        // vue 双向绑定更新数据
-        verification_code_ele.dispatchEvent(new Event("input"))
-        window.setTimeout(() => {
-            verification_code_ele.focus()
-        }, 200);
+    let captcha_inputs = Array.from(document.querySelectorAll("input")).filter(input_condition);
+    found_captcha_input = captcha_inputs.length === 0 ? null : captcha_inputs[0];
+    DEBUG && console.log("==auto_detect", captcha_inputs);
+
+    if (captcha_inputs.length === 0) {
+        found_captcha_input = get_element_from_iframe(input_condition)
+        console.log("==auto_detect again", found_captcha_input);
     }
+    if (found_captcha_input) fill_input(captcha_inputs[0], captcha);
 }
 
 
@@ -138,9 +154,6 @@ function find_attribute(element, attr = "placeholder", val = "验证码", eq = f
     }
     return false;
 }
-
-
-let exist_toast
 
 function toast(msg, duration) {
     if (exist_toast) {
@@ -169,33 +182,32 @@ function toast(msg, duration) {
     }, duration);
 }
 
-
-function getImgFromIFrame(url) {
-    let root_url = new URL(url).host
+function find_captcha_image_from_iframe(url) {
+    let root_url = get_host(url)
     let elements = Array.from(document.querySelectorAll("iframe"))
-        .filter(el => root_url === new URL(el.src).host)
+        .filter(el => root_url === get_host(el.src))
         .map(el => {
-            DEBUG && console.log("getImgFromIFrame frame", el, el.contentDocument.querySelectorAll("iframe"));
+            DEBUG && console.log("find_captcha_image_from_iframe frame", el, el.contentDocument.querySelectorAll("iframe"));
             return find_captcha_image(url, el.contentDocument)
         })
         .filter(el => el);
-    DEBUG && console.log("getImgFromIFrame", elements, url)
+    DEBUG && console.log("find_captcha_image_from_iframe", elements, url)
     return elements && elements[0];
 }
 
 function get_element_from_iframe(cond) {
     let root_url = window.location.host
     let elements = Array.from(document.querySelectorAll("iframe"))
-        .filter(el => root_url === new URL(el.src).host)
+        .filter(el => root_url === get_host(el.src))
         .flatMap(el => Array.from(el.contentDocument.querySelectorAll("input")))
         .filter(el => cond(el));
     if (!elements || elements.length === 0) {
         DEBUG && console.log("get_element_from_iframe 2")
         elements = Array.from(document.querySelectorAll("iframe"))
-            .filter(el => root_url === new URL(el.src).host)
+            .filter(el => root_url === get_host(el.src))
             .flatMap(el =>
                 Array.from(el.contentDocument.querySelectorAll("iframe"))
-                    .filter(el => root_url === new URL(el.src).host)
+                    .filter(el => root_url === get_host(el.src))
             )
             .flatMap(el => Array.from(el.contentDocument.querySelectorAll("input")))
             .filter(el => cond(el));
@@ -204,17 +216,21 @@ function get_element_from_iframe(cond) {
     return elements && elements[0];
 }
 
+function get_host(url) {
+    return new URL(url).host
+}
+
 function find_captcha_image(url, doc = document) {
-    DEBUG && console.log("find_captcha_image", url)
+    DEBUG && console.log("_____find_captcha_image_____", url)
     if (!doc) return;
     let elements = Array.from(doc.querySelectorAll("img")).filter(el => el.src.includes(url));
     // 没有查到,查询doc中iframe
     DEBUG && console.log("find_captcha 1", elements)
     if (!elements || elements.length === 0) {
         DEBUG && console.log("find_captcha_image from iframe", doc.querySelectorAll("iframe"));
-        let root_url = new URL(url).host
+        let root_url = get_host(url)
         elements = Array.from(doc.querySelectorAll("iframe"))
-            .filter(el => root_url === new URL(el.src).host)
+            .filter(el => root_url === get_host(el.src))
             .flatMap(el => {
                 DEBUG && console.log("find_captcha_image from --------", doc.querySelectorAll("iframe"));
                 return Array.from(el.contentDocument.querySelectorAll("img"));
@@ -292,17 +308,19 @@ document.addEventListener('copy', e => {
 })
 
 function find_element(selector) {
+    let node = document.querySelector(selector)
+    if (node) return node
+    // 没找到,再去找iframe
     let iframes = document.querySelectorAll("iframe");
     for (let iframe of iframes) {
         DEBUG && console.log("iframe", iframe);
         let ele = iframe.contentDocument.querySelector(selector);
         if (ele) {
             DEBUG && console.info("gotcha iframe", iframe);
-            ele.disable = false;
             return ele;
         }
     }
-    return document.querySelector(selector);
+    return node;
 }
 
 let fill_config = {}
@@ -402,10 +420,10 @@ window.onload = function () {
     if (fill_config && fill_config.img) {
         console.log("_______loaded_____ image config", fill_config, verifycode_ele)
         let ele = find_element(fill_config.img);
+        // cache img for speed up
+        found_captcha_img = ele
         if (verifycode_ele) {
             verifycode_ele.push(ele)
-        } else {
-            verifycode_ele = ele
         }
         console.log("_______loaded_____ image very_code_nodes", verifycode_ele)
     }
@@ -413,7 +431,6 @@ window.onload = function () {
     chrome.storage.sync.get({"reco_on_load": false})
         .then(config => {
             verifycode_ele.forEach(el => {
-                    // listen(el)
                     very_code_nodes.push(el)
                     listen(el)
                     DEBUG && console.log("_______add click_____", el)
