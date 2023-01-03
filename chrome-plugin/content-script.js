@@ -17,7 +17,12 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
             toast(data.data.message)
             break;
         case "base64":
-            let img = getImg(data.data.srcUrl) || getImgFromIFrame(data.data.srcUrl);
+            let img = find_captcha_image(data.data.srcUrl) || getImgFromIFrame(data.data.srcUrl);
+            DEBUG && console.log("gotcha img ", img)
+            if (!img) {
+                toast("图片解析错误")
+                return
+            }
             // 限制验证码图片高度, 防止滥用
             if (img.height > 200) {
                 toast("你确定这是验证码?")
@@ -79,6 +84,7 @@ function copy(str, mimeType) {
         let ele = find_element(config.selector)
         if (ele) {
             DEBUG && console.log("自动填充", "找到节点并填写", ele)
+            ele.focus();
             ele.value = str
             // vue 双向绑定更新数据
             ele.dispatchEvent(new Event("input"))
@@ -97,17 +103,24 @@ function copy(str, mimeType) {
     document.execCommand("copy", false, str);
 }
 
+function input_condition(el) {
+    return el.type !== 'hidden' && (
+        find_attribute(el, "data-msg-required")
+        || find_attribute(el)
+        || find_attribute(el, "tip")
+        || find_attribute(el, "id", "verify")
+        || find_attribute(el, "id", "validate")
+        || find_attribute(el, "alt", "kaptcha")
+    )
+}
+
 function auto_detect_and_fill(code) {
-    let verification_code_ele = Array.from(document.getElementsByTagName("input")).filter(el =>
-            el.type !== 'hidden' && (
-                find_attribute(el, "data-msg-required")
-                || find_attribute(el)
-                || find_attribute(el, "tip")
-                || find_attribute(el, "id", "verify")
-                || find_attribute(el, "id", "validate")
-                || find_attribute(el, "alt", "kaptcha")
-            )
-    )[0];
+    let verification_code_ele = Array.from(document.querySelectorAll("input")).filter(input_condition)[0];
+    console.log("from iframe 11", verification_code_ele);
+    if (!verification_code_ele || verification_code_ele.length === 0) {
+        verification_code_ele = get_element_from_iframe(input_condition)
+        console.log("from iframe 22", verification_code_ele);
+    }
     if (verification_code_ele) {
         verification_code_ele.value = code
         // vue 双向绑定更新数据
@@ -172,14 +185,57 @@ function toast(msg, duration) {
 
 
 function getImgFromIFrame(url) {
+    let root_url = new URL(url).host
     let elements = Array.from(document.querySelectorAll("iframe"))
-        .map(el => getImg(url, el.contentDocument))
+        .filter(el => root_url === new URL(el.src).host)
+        .map(el => {
+            DEBUG && console.log("getImgFromIFrame frame", el, el.contentDocument.querySelectorAll("iframe"));
+            return find_captcha_image(url, el.contentDocument)
+        })
         .filter(el => el);
+    DEBUG && console.log("getImgFromIFrame", elements, url)
     return elements && elements[0];
 }
 
-function getImg(url, doc = document) {
-    let elements = Array.from(doc.getElementsByTagName("img")).filter(el => el.src.includes(url));
+function get_element_from_iframe(cond) {
+    let root_url = window.location.host
+    let elements = Array.from(document.querySelectorAll("iframe"))
+        .filter(el => root_url === new URL(el.src).host)
+        .flatMap(el => Array.from(el.contentDocument.querySelectorAll("input")))
+        .filter(el => cond(el));
+    if (!elements || elements.length === 0) {
+        DEBUG && console.log("get_element_from_iframe 2")
+        elements = Array.from(document.querySelectorAll("iframe"))
+            .filter(el => root_url === new URL(el.src).host)
+            .flatMap(el =>
+                Array.from(el.contentDocument.querySelectorAll("iframe"))
+                    .filter(el => root_url === new URL(el.src).host)
+            )
+            .flatMap(el => Array.from(el.contentDocument.querySelectorAll("input")))
+            .filter(el => cond(el));
+    }
+    DEBUG && console.log("get_element_from_iframe", elements, elements[0]);
+    return elements && elements[0];
+}
+
+function find_captcha_image(url, doc = document) {
+    DEBUG && console.log("find_captcha_image", url)
+    if (!doc) return;
+    let elements = Array.from(doc.querySelectorAll("img")).filter(el => el.src.includes(url));
+    // 没有查到,查询doc中iframe
+    DEBUG && console.log("find_captcha 1", elements)
+    if (!elements || elements.length === 0) {
+        DEBUG && console.log("find_captcha_image from iframe", doc.querySelectorAll("iframe"));
+        let root_url = new URL(url).host
+        elements = Array.from(doc.querySelectorAll("iframe"))
+            .filter(el => root_url === new URL(el.src).host)
+            .flatMap(el => {
+                DEBUG && console.log("find_captcha_image from --------", doc.querySelectorAll("iframe"));
+                return Array.from(el.contentDocument.querySelectorAll("img"));
+            })
+            .filter(el => el.src.includes(url));
+        DEBUG && console.log("find_captcha iframe rr", elements);
+    }
     return elements && elements[0];
 }
 
@@ -251,6 +307,16 @@ document.addEventListener('copy', e => {
 })
 
 function find_element(selector) {
+    let iframes = document.querySelectorAll("iframe");
+    for (let iframe of iframes) {
+        DEBUG && console.log("iframe", iframe);
+        let ele = iframe.contentDocument.querySelector(selector);
+        if (ele) {
+            DEBUG && console.info("gotcha iframe", iframe);
+            ele.disable = false;
+            return ele;
+        }
+    }
     return document.querySelector(selector);
 }
 
@@ -311,6 +377,7 @@ const very_code_nodes = []
 const MutationObserver = window.MutationObserver || window.WebKitMutationObserver || window.MozMutationObserver
 
 function listen(ele) {
+    console.log("listen", ele);
     // el.addEventListener('click', img_click)
     let observer = new MutationObserver(function (mutations) {
         mutations.forEach(function (mutation) {
@@ -319,6 +386,11 @@ function listen(ele) {
                     toast("请勿频繁点击", 1500)
                     return;
                 }
+                if (!mutation.target) {
+                    toast("图片解析错误")
+                    return
+                }
+                console.log("mutation", mutation.target);
                 chrome.runtime.sendMessage(drawBase64Image(mutation.target));
                 // 调试模式可以无间隔发送请求,服务器会限制请求数量
                 if (!DEBUG) mutation.target.onload = null
@@ -337,8 +409,8 @@ window.onload = function () {
             DEBUG = config.debug
             console.log("debug", DEBUG)
         })
-    let verifycode_ele = Array.from(document.getElementsByTagName("img")).filter(el =>
-        find_attribute(el, "alt", "图片刷新") ||
+    let verifycode_ele = Array.from(document.querySelectorAll("img")).filter(el =>
+        find_attribute(el, "alt", /图片刷新|验证码/gi) ||
         find_attribute(el, "src", /Validate|captcha|login-code-img/gi) ||
         find_attribute(el, "id", /auth|code/gi) ||
         find_attribute(el, "class", /login-code|verify/gi)
