@@ -40,7 +40,7 @@ def init():
     t = service['worker_threads']
     t = int(t)
     for i in range(t):
-        ddddocr_list.append(ddddocr.DdddOcr())
+        ddddocr_list.append(ddddocr.DdddOcr(show_ad=False))
         ddddocr_state.append(0)
         os.system('cls' if "window" in platform.platform().lower() else "clear")
 
@@ -232,4 +232,4 @@ def post_process(data: str) -> str:
 
 if __name__ == '__main__':
     threading.Thread(target=init).start()
-    app.run(host=service['listen'], port=service['port'], debug=True)
+    app.run(host=service['listen'], port=service['port'], debug=False)
