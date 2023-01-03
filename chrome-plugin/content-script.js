@@ -53,20 +53,6 @@ chrome.storage.sync.get({"rule": ""})
         parse_config(config.rule)
     })
 
-function img_click(event) {
-    if (debounce()) {
-        toast("请勿频繁点击", 1500)
-        return;
-    }
-    let ele = event.path[0];
-    DEBUG && console.log("img click", ele)
-    ele.onload = function () {
-        chrome.runtime.sendMessage(drawBase64Image(ele));
-        // 调试模式可以无间隔发送请求,服务器会限制请求数量
-        if (!DEBUG) ele.onload = null
-    }
-}
-
 function debounce(interval = INTERVAL) {
     let now = Date.now();
     interval = DEBUG ? interval / 5 : interval
@@ -246,7 +232,6 @@ function drawBase64Image(img) {
             DEBUG && console.log("cache nodes", img)
             very_code_nodes.push(img)
             listen(img)
-            // img.addEventListener('click', img_click);
         }
     }
     let canvas = document.createElement('canvas');
@@ -378,7 +363,6 @@ const MutationObserver = window.MutationObserver || window.WebKitMutationObserve
 
 function listen(ele) {
     console.log("listen", ele);
-    // el.addEventListener('click', img_click)
     let observer = new MutationObserver(function (mutations) {
         mutations.forEach(function (mutation) {
             mutation.target.onload = function () {
