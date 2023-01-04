@@ -1,3 +1,8 @@
+# from gevent import monkey
+# from gevent.pywsgi import WSGIServer
+#
+# monkey.patch_all()
+
 import configparser
 import json
 import os
@@ -5,7 +10,6 @@ import platform
 import re
 import threading
 import time
-
 import ddddocr
 import requests
 from flask import Flask, request
@@ -25,20 +29,22 @@ app = Flask(__name__)
 
 ddddocr_list = []
 ddddocr_state = []
+
 USERS = {}
 RESTRICT_USERS = {}
 black_users = set()
-SERVER_IP = "127.0.0.1"
-RATE_TIME = 3600
-global RATE_LIMIT
-global BLACK_OVER_LIMIT
-RATE_LIMIT = int(RATE_TIME / 60)
-BLACK_OVER_LIMIT = RATE_LIMIT
+white_ips = ["127.0.0.1"]
+ips = service['white_ips'].split(",")
+if "" in ips:
+    ips.remove("")
+white_ips.extend(ips)
+# 限制请求时间间隔
+LIMIT_INTERVAL = int(service['limit_interval'])
+RATE_LIMIT = int(service['rate_limit'])
 
 
 def init():
-    t = service['worker_threads']
-    t = int(t)
+    t = int(service['worker_threads'])
     for i in range(t):
         ddddocr_list.append(ddddocr.DdddOcr(show_ad=False))
         ddddocr_state.append(0)
@@ -61,12 +67,12 @@ def destroy_ddddocr(i):
 
 
 def check_limit(ip):
-    if ip in USERS and SERVER_IP != ip:
+    if ip in USERS and ip not in white_ips:
         current_user = USERS[ip]
         print("current %s" % current_user)
         if ip in black_users:
             raise Exception("You request too much, and now in blacklist!!!")
-        if time.time() - current_user["time"] < RATE_TIME:
+        if time.time() - current_user["time"] < LIMIT_INTERVAL:
             if current_user["count"] < RATE_LIMIT:
                 current_user["count"] += 1
             else:
@@ -76,9 +82,9 @@ def check_limit(ip):
                 else:
                     RESTRICT_USERS[ip] = 1
                 print("black  %s" % RESTRICT_USERS)
-                if RESTRICT_USERS[ip] > BLACK_OVER_LIMIT:
+                if RESTRICT_USERS[ip] > RATE_LIMIT:
                     black_users.add(ip)
-                raise Exception("request limit!!! Try again in %s min" % int(RATE_TIME / 60))
+                raise Exception("request limit!!! Try again in %s min" % int(LIMIT_INTERVAL / 60))
         else:
             reset_limit(ip)
     else:
@@ -146,8 +152,8 @@ def ocr():
 def unlock(unlock_ip):
     print(f"unlock_ip {unlock_ip}")
     ip = parse_ip(request)
-    print("unlock", ip == SERVER_IP, unlock_ip in black_users)
-    if ip == SERVER_IP and unlock_ip in black_users:
+    print("unlock", ip in white_ips, unlock_ip in black_users)
+    if ip in white_ips and unlock_ip in black_users:
         black_users.remove(unlock_ip)
         reset_limit(unlock_ip)
         print("after unlock black %s" % RESTRICT_USERS)
@@ -166,8 +172,8 @@ def rate(rate_count):
         global RATE_LIMIT
         # 不限制,
         if rate_count == 0:
-            rate_count = RATE_TIME * 10
-        if ip == SERVER_IP and rate_count != RATE_LIMIT:
+            rate_count = LIMIT_INTERVAL * 10
+        if ip in white_ips and rate_count != RATE_LIMIT:
             print(f"old= {RATE_LIMIT}, new= {rate_count}")
             RATE_LIMIT = rate_count
             return json.dumps({'status': True, 'msg': "success", 'ip': ip, 'rate': RATE_LIMIT})
@@ -232,4 +238,17 @@ def post_process(data: str) -> str:
 
 if __name__ == '__main__':
     threading.Thread(target=init).start()
-    app.run(host=service['listen'], port=service['port'], debug=False)
+    # 原生不支持多线程,调试使用
+    # app.run(host=service['listen'], port=service['port'], debug=False)
+
+    # gevent WSGI方式, 必须在最顶部导包并patch, monkey.patch_all(),否则会堵塞
+    # WSGIServer((service['listen'], int(service['port'])), app).serve_forever()
+
+    # 改用waitress WSGI
+    # from waitress import serve
+    # serve(app, host=service['listen'], port=int(service['port']))
+
+    # 内置 WSGI
+    from wsgiref.simple_server import make_server
+    server = make_server(service['listen'], int(service['port']), app)
+    server.serve_forever()

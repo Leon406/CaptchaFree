@@ -1,3 +1,7 @@
 requests
 flask
+# Python WSGI 方式1
+# gevent
+# Python WSGI 方式2
+# waitress
 ddddocr
