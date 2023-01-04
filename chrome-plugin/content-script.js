@@ -130,7 +130,7 @@ function auto_detect_and_fill_captcha(captcha) {
         found_captcha_input = get_element_from_iframe(input_condition)
         console.log("==auto_detect again", found_captcha_input);
     }
-    if (found_captcha_input) fill_input(captcha_inputs[0], captcha);
+    if (found_captcha_input) fill_input(found_captcha_input, captcha);
 }
 
 
