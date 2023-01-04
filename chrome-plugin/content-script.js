@@ -414,8 +414,8 @@ window.onload = function () {
     let verifycode_ele = Array.from(document.querySelectorAll("img")).filter(el =>
         find_attribute(el, "alt", /图片刷新|验证码/gi) ||
         find_attribute(el, "src", /Validate|captcha|login-code-img/gi) ||
-        find_attribute(el, "id", /auth|code/gi) ||
-        find_attribute(el, "class", /login-code|verify/gi)
+        find_attribute(el, "id", /auth|captcha|imgcode/gi) ||
+        find_attribute(el, "class", /login-code|captcha|verify/gi)
     )
     if (fill_config && fill_config.img) {
         console.log("_______loaded_____ image config", fill_config, verifycode_ele)
