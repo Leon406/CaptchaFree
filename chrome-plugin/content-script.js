@@ -1,6 +1,7 @@
 let last_time = 0
 const INTERVAL = 2000
 let DEBUG = false
+let MODE
 // 避免多次查询,提升性能
 let found_captcha_img
 let found_captcha_input
@@ -46,6 +47,9 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
         case "remove_restrict":
             remove_restrict()
             break;
+        case "mode":
+            MODE = data.data
+            break;
         default:
             console.log("error type")
     }
@@ -85,6 +89,7 @@ function get_captcha_input(text) {
 }
 
 function copy(text, mimeType) {
+    text = post_process_captcha(text)
     if (found_captcha_input) {
         console.log("=======>", "got input");
         fill_input(found_captcha_input, text)
@@ -392,7 +397,7 @@ function listen(ele) {
                     toast("图片解析错误")
                     return
                 }
-                console.log("mutation", mutation.target);
+                DEBUG && console.log("mutation", mutation.target);
                 chrome.runtime.sendMessage(drawBase64Image(mutation.target));
                 // 调试模式可以无间隔发送请求,服务器会限制请求数量
                 if (!DEBUG) mutation.target.onload = null
@@ -405,12 +410,51 @@ function listen(ele) {
 }
 
 
+function post_process_captcha(text) {
+    let tmp = text
+    // 容易混淆 0o 1l 2z 9g
+    switch (MODE) {
+        case "num":
+            tmp = tmp.replace("o", "0")
+                .replace("O", "0")
+                .replace("l", "1")
+                .replace("z", "2")
+                .replace("b", "6")
+                .replace("B", "8")
+                .replace("g", "9")
+            break
+        case "letter":
+            tmp = tmp.replace("0", "o")
+                .replace("1", "l")
+                .replace("2", "z")
+                .replace("6", "b")
+                .replace("8", "B")
+                .replace("9", "g")
+            break
+        case "mix":
+        default:
+            break
+    }
+    if (tmp !== text) {
+        console.log("post_process_captcha", text, "==>", tmp);
+    }
+    return tmp;
+}
+
+
 window.onload = function () {
     chrome.storage.sync.get({"debug": false})
         .then(config => {
             DEBUG = config.debug
             console.log("debug", DEBUG)
         })
+
+    chrome.storage.sync.get({"mode": "mix"})
+        .then(config => {
+            MODE = config.mode
+            console.log("mode", MODE)
+        })
+
     let verifycode_ele = Array.from(document.querySelectorAll("img")).filter(el =>
         find_attribute(el, "alt", /图片刷新|验证码/gi) ||
         find_attribute(el, "src", /Validate|captcha|login-code-img/gi) ||

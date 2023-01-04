@@ -66,6 +66,7 @@ function restore_options() {
         sendMessage({"type": "free_edit"});
     });
 
+    add_radio_box_listener("input[name='mode']", "mode", "mix")
     add_check_box_listener("reco_on_load", "reco_on_load")
     add_check_box_listener("debug", "debug", true)
     add_check_box_listener("copy_uri_reco", "copy_reco")
@@ -84,6 +85,30 @@ function add_check_box_listener(id, prop, is_send = false) {
                 dict[prop] = cb.checked
                 chrome.storage.sync.set(dict)
                 is_send && sendMessage({"type": prop, data: cb.checked});
+            })
+        })
+}
+
+function add_radio_box_listener(selector, prop, def) {
+    let dict = {}
+    dict[prop] = def
+    let current_value
+    chrome.storage.sync.get(dict)
+        .then(config => {
+            current_value = config[prop]
+            console.log("current_value", config, current_value);
+            Array.from(document.querySelectorAll(selector)).forEach(ele => {
+                console.log("click", ele.value, ele.checked);
+                if (current_value === ele.value) {
+                    ele.checked = true
+                }
+                ele.addEventListener('click', e => {
+                    let target = e.target
+                    console.log("click", target, target.checked);
+                    dict[prop] = target.value
+                    chrome.storage.sync.set(dict)
+                    sendMessage({"type": prop, data: target.value});
+                })
             })
         })
 }
