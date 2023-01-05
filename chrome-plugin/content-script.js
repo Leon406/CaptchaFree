@@ -112,12 +112,11 @@ function fill_input(input, text) {
 
 function input_condition(el) {
     return el.type !== 'hidden' && (
-        find_attribute(el, "data-msg-required")
-        || find_attribute(el)
-        || find_attribute(el, "tip")
-        || find_attribute(el, "id", "verify")
-        || find_attribute(el, "id", "validate")
+        find_attribute(el)
+        || find_attribute(el, "id", /validate|verify/gi)
         || find_attribute(el, "alt", "kaptcha")
+        || find_attribute(el, "data-msg-required")
+        || find_attribute(el, "tip")
     )
 }
 
