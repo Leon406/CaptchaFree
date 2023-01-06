@@ -3,6 +3,7 @@
 #
 # monkey.patch_all()
 
+import base64
 import configparser
 import json
 import logging
@@ -28,7 +29,7 @@ config.read('service.conf', encoding='utf-8')
 service = config['service']
 
 # 日志设置
-LOG_TO_CONSOLE = False
+LOG_TO_CONSOLE = True
 log_file = 'log.txt'
 logger = logging.getLogger('Ocr')
 fmt_str = "%(asctime)s [%(lineno)d] %(levelname)s - %(message)s"
@@ -61,6 +62,8 @@ white_ips.extend(ips)
 # 限制请求时间间隔
 LIMIT_INTERVAL = int(service['limit_interval'])
 RATE_LIMIT = int(service['rate_limit'])
+
+det = ddddocr.DdddOcr(det=False, ocr=False)
 
 
 def init():
@@ -168,6 +171,53 @@ def ocr():
         return json.dumps({'status': False, 'msg': str(e)})
 
 
+# 支持 参数 url, base64,file
+@app.route('/slide', methods=['POST'])
+def slide():
+    try:
+        if "x-requested-with" not in request.headers and "X-Requested-With" not in request.headers:
+            return json.dumps({'code': False, 'msg': '请求错误'})
+        xrw = request.headers.getlist("x-requested-with") or request.headers.getlist("X-Requested-With")
+        if xrw[0] != "XMLHttpRequest":
+            return json.dumps({'code': False, 'msg': 'error'})
+        ip = parse_ip(request)
+        check_limit(ip)
+        print(request.form)
+        if "base64" in request.form:
+            b64 = request.form['base64']
+            print(b64)
+            b64 = b64[b64.find(',') + 1:]
+            target = request.form['target']
+            target = target[target.find(',') + 1:]
+
+            print("base64", len(b64), len(target))
+
+            return slide_match(base64.b64decode(b64), base64.b64decode(target), ip)
+        if "url" in request.form:
+            pre_request = requests.head(request.form['url'], timeout=2)
+            length = 0
+            if "Content-Length" in pre_request.headers:
+                length = pre_request.headers["Content-Length"]
+            elif "content-length" in pre_request.headers:
+                length = pre_request.headers["content-length"]
+
+            # 校验图片大小
+            if length:
+                if int(length) < 640 * 1024:
+                    return slide_match(requests.get(request.form['url'], timeout=3).content,
+                                       requests.get(request.form['target'], timeout=3).content,
+                                       ip)
+                else:
+                    return json.dumps({'code': False, 'msg': '文件大于640k'})
+            else:
+                return slide_match(requests.get(request.form['url'], timeout=3).content,
+                                   requests.get(request.form['target'], timeout=3).content,
+                                   ip)
+    except Exception as e:
+        logger.error(e)
+        return json.dumps({'status': False, 'msg': str(e)})
+
+
 @app.route('/unlock/<unlock_ip>', methods=['PUT'])
 def unlock(unlock_ip):
     ip = parse_ip(request)
@@ -226,6 +276,18 @@ def classify(content, ip):
     finally:
         destroy_ddddocr(i)
         logger.debug(f"线程{i}已释放")
+
+
+def slide_match(background, target, ip):
+    start = time.time()
+    try:
+        res = det.slide_match(target, background)
+        logger.info(f"reco==> {res}")
+        end = time.time()
+        return json.dumps({'status': True, 'msg': 'SUCCESS', 'result': res, 't': round(end - start, 3), 'ip': ip,
+                           'remain': RATE_LIMIT - USERS[ip]["count"]})
+    except Exception as e:
+        logger.error(f"线程 {e}")
 
 
 def parse_ip(req):
