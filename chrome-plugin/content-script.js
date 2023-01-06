@@ -5,6 +5,7 @@ let MODE
 // 避免多次查询,提升性能
 let found_captcha_img
 let found_captcha_input
+let found_target
 let exist_toast
 
 // 监听 background 传来的数据 可对页面dom操作
@@ -50,6 +51,17 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
         case "mode":
             MODE = data.data
             break;
+        case "slide_verify":
+            let target = found_target.toDataURL()
+            let background = found_captcha_img.toDataURL()
+            sendResponse({target, background})
+            break;
+        case "slide_result":
+            console.log("slide_result", data.data.target[0], found_captcha_input);
+            // let t = document.querySelector("#captcha>canvas.block")
+            // let slider = document.querySelector(".slider")
+            moveSideCaptcha(found_target, found_captcha_input, data.data.target[0])
+            break;
         default:
             console.log("error type")
     }
@@ -71,10 +83,9 @@ function debounce(interval = INTERVAL) {
 }
 
 function get_captcha_input(text) {
-    let config = fill_config[location.host];
-    if (config) {
-        DEBUG && console.info("==fill==", "找到规则@@@", config.selector)
-        let ele = find_element(config.selector)
+    if (fill_config) {
+        DEBUG && console.info("==fill==", "找到规则@@@", fill_config.selector)
+        let ele = find_element(fill_config.selector)
         if (ele) {
             DEBUG && console.info("==fill==", "找到节点并填写!!!", ele)
             fill_input(ele, text);
@@ -96,6 +107,7 @@ function copy(text, mimeType) {
     } else {
         get_captcha_input(text);
     }
+    toast(`验证码: ${text} ,如未复制到粘贴板请手动填写`)
 
     document.oncopy = function (event) {
         event.clipboardData.setData(mimeType, text);
@@ -113,11 +125,18 @@ function fill_input(input, text) {
 function input_condition(el) {
     return el.type !== 'hidden' && (
         find_attribute(el)
-        || find_attribute(el, "id", /validate|verify/gi)
+        || find_attribute(el, "id", /validate|veryCode|verify/gi)
         || find_attribute(el, "alt", "kaptcha")
         || find_attribute(el, "data-msg-required")
         || find_attribute(el, "tip")
     )
+}
+
+function image_condition(el) {
+    return find_attribute(el, "alt", /图片刷新|验证码/gi) ||
+        find_attribute(el, "src", /Validate|captcha|login-code-img/gi) ||
+        find_attribute(el, "id", /auth|yanzhengma|yzm|verify|captcha|imgcode/gi) ||
+        find_attribute(el, "class", /login-code|yanzhengma|yzm|code-img|captcha|verify/gi)
 }
 
 function auto_detect_and_fill_captcha(captcha) {
@@ -339,11 +358,14 @@ function parse_config(config) {
     for (let i = 0; i < items.length; i++) {
         let info = items[i].split(",");
         DEBUG && console.log("解析规则 info:", items[i], info)
+
         if (host !== info[0]) continue
+
         if (info.length >= 2) {
             let selector = info[1]
-            let img = info.length === 3 ? info[2] : ''
-            fill_config[info[0]] = {selector, img}
+            let img = info.length >= 3 ? info[2] : ''
+            let target = info.length >= 4 ? info[3] : ''
+            fill_config = {selector, img, target}
         } else {
             DEBUG && console.log("配置错误:", items[i])
         }
@@ -388,6 +410,10 @@ function listen(ele) {
     let observer = new MutationObserver(function (mutations) {
         mutations.forEach(function (mutation) {
             mutation.target.onload = function () {
+                if (found_target) {
+                    console.log("滑块");
+                    return;
+                }
                 if (debounce()) {
                     toast("请勿频繁点击", 1500)
                     return;
@@ -414,21 +440,26 @@ function post_process_captcha(text) {
     // 容易混淆 0o 1l 2z 9g
     switch (MODE) {
         case "num":
-            tmp = tmp.replace("o", "0")
-                .replace("O", "0")
-                .replace("l", "1")
-                .replace("z", "2")
-                .replace("b", "6")
-                .replace("B", "8")
-                .replace("g", "9")
+            tmp = tmp
+                .replaceAll("O", "0")
+                .replaceAll(/[ouOD。口]/gi, "0")
+                .replaceAll(/[，,\-li]/g, "1")
+                .replaceAll(/[己已="]/g, "2")
+                .replaceAll("a", "3")
+                .replaceAll(/[bG"]/g, "6")
+                .replaceAll(/[yz>"]/gi, "7")
+                .replaceAll(/[&B日"]/g, "8")
+                .replaceAll("g", "9")
             break
         case "letter":
-            tmp = tmp.replace("0", "o")
-                .replace("1", "l")
-                .replace("2", "z")
-                .replace("6", "b")
-                .replace("8", "B")
-                .replace("9", "g")
+            tmp = tmp
+                .replaceAll(/[0。口]/g, "o")
+                .replaceAll("口", "o")
+                .replaceAll("1", "l")
+                .replaceAll("2", "z")
+                .replaceAll("6", "b")
+                .replaceAll(/[&8日"]/g, "B")
+                .replaceAll("9", "g")
             break
         case "mix":
         default:
@@ -454,18 +485,17 @@ window.onload = function () {
             console.log("mode", MODE)
         })
 
-    let verifycode_ele = Array.from(document.querySelectorAll("img")).filter(el =>
-        find_attribute(el, "alt", /图片刷新|验证码/gi) ||
-        find_attribute(el, "src", /Validate|captcha|login-code-img/gi) ||
-        find_attribute(el, "id", /auth|captcha|imgcode/gi) ||
-        find_attribute(el, "class", /login-code|captcha|verify/gi)
-    )
+    let verifycode_ele = Array.from(document.querySelectorAll("img")).filter(image_condition)
     if (fill_config && fill_config.img) {
         console.log("_______loaded_____ image config", fill_config, verifycode_ele)
         let ele = find_element(fill_config.img);
         // cache img for speed up
         found_captcha_img = ele
-        if (verifycode_ele) {
+        found_captcha_input = find_element(fill_config.selector);
+        if (fill_config.target) {
+            found_target = find_element(fill_config.target);
+        }
+        if (verifycode_ele && ele.tagName !=="CANVAS") {
             verifycode_ele.push(ele)
         }
         console.log("_______loaded_____ image very_code_nodes", verifycode_ele)
@@ -488,3 +518,138 @@ window.onload = function () {
             )
         })
 }
+
+function getEleTransform(el) {
+    const style = window.getComputedStyle(el, null);
+    let transform =
+        style.getPropertyValue("-webkit-transform") ||
+        style.getPropertyValue("-moz-transform") ||
+        style.getPropertyValue("-ms-transform") ||
+        style.getPropertyValue("-o-transform") ||
+        style.getPropertyValue("transform") ||
+        "null";
+    return transform && transform.split(",")[4];
+}
+
+function moveSideCaptcha(target, btn, distance) {
+    if (distance === 0) {
+        console.log("distance", distance);
+        return;
+    }
+    let varible = null;
+    let targetStyle = window.getComputedStyle(target, null);
+    let targetLeft =
+        Number(targetStyle.left.replace("px", "")) || 0;
+    let targetParentStyle = window.getComputedStyle(target.parentNode, null);
+    let targetParentLeft =
+        Number(targetParentStyle.left.replace("px", "")) || 0;
+    let transform = getEleTransform(target);
+    let targetTransform = Number(transform) || 0;
+    let parentTranform = getEleTransform(target.parentNode);
+    let targetParentTransform =
+        Number(parentTranform) || 0;
+
+    console.log("+++++", targetLeft, targetParentLeft, targetTransform, targetParentTransform)
+
+    var  mousedown = document.createEvent("MouseEvents");
+    var  rect = btn.getBoundingClientRect();
+    var  x = rect.x;
+    var  y = rect.y;
+    mousedown.initMouseEvent(
+        "mousedown",
+        true,
+        true,
+        document.defaultView,
+        0,
+        x,
+        y,
+        x,
+        y,
+        false,
+        false,
+        false,
+        false,
+        0,
+        null);
+    btn.dispatchEvent(mousedown);
+
+    var dx = 0;
+    var dy = 0;
+    let interval = setInterval(function () {
+        var  mousemove = document.createEvent("MouseEvents");
+        var  _x = x + dx;
+        var  _y = y + dy;
+        mousemove.initMouseEvent(
+            "mousemove",
+            true,
+            true,
+            document.defaultView,
+            0,
+            _x,
+            _y,
+            _x,
+            _y,
+            false,
+            false,
+            false,
+            false,
+            0,
+            null);
+        btn.dispatchEvent(mousemove);
+        btn.dispatchEvent(mousemove);
+
+        let newTargetLeft =
+            Number(targetStyle.left.replace("px", "")) || 0;
+        let newTargetParentLeft =
+            Number(targetParentStyle.left.replace("px", "")) || 0;
+        let newTargetTransform = Number(transform) || 0;
+        let newTargetParentTransform =
+            Number(parentTranform) || 0;
+
+        if (newTargetLeft !== targetLeft) {
+            varible = newTargetLeft;
+        } else if (newTargetParentLeft !== targetParentLeft) {
+            varible = newTargetParentLeft;
+        } else if (newTargetTransform !== targetTransform) {
+            varible = newTargetTransform;
+        } else if (newTargetParentTransform !== targetParentTransform) {
+            varible = newTargetParentTransform;
+        }
+        if (varible >= distance) {
+            clearInterval(interval);
+            var  mouseup = document.createEvent("MouseEvents");
+            mouseup.initMouseEvent(
+                "mouseup",
+                true,
+                true,
+                document.defaultView,
+                0,
+                _x,
+                _y,
+                _x,
+                _y,
+                false,
+                false,
+                false,
+                false,
+                0,
+                null);
+            setTimeout(() => {
+                btn.dispatchEvent(mouseup);
+            }, Math.ceil(Math.random() * 2000));
+        } else {
+            if (dx >= distance - 20) {
+                dx += Math.ceil(Math.random() * 2);
+            } else {
+                dx += Math.ceil(Math.random() * 10);
+            }
+            let sign = Math.random() > 0.5 ? -1 : 1;
+            dy += Math.ceil(Math.random() * 3 * sign);
+        }
+    }, 10);
+    setTimeout(() => {
+        clearInterval(interval);
+    }, 10000);
+}
+
+
