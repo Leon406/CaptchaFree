@@ -29,8 +29,8 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
                 toast("未找到验证码图片!!!")
                 return
             }
-            // 限制验证码图片高度, 防止滥用
-            if (found_captcha_img.height > 200) {
+            // 限制验证码图片高度, 防止滥用, 排除宽小于等于高
+            if (found_captcha_img.height > 200 || found_captcha_img.height >= found_captcha_img.width) {
                 toast("你确定这是验证码?")
             } else {
                 sendResponse(drawBase64Image(found_captcha_img));
@@ -52,9 +52,14 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
             MODE = data.data
             break;
         case "slide_verify":
-            let target = found_target.toDataURL()
-            let background = found_captcha_img.toDataURL()
-            sendResponse({target, background})
+            if (found_target && found_captcha_img) {
+                let target = found_target.toDataURL()
+                let background = found_captcha_img.toDataURL()
+                sendResponse({target, background})
+            } else {
+                toast("请确认是否配置滑块规则?")
+            }
+
             break;
         case "slide_result":
             console.log("slide_result", data.data.target[0], found_captcha_input);
@@ -117,6 +122,7 @@ function copy(text, mimeType) {
 }
 
 function fill_input(input, text) {
+    DEBUG && console.log("==fill_input", text, input);
     input.focus();
     input.value = text
     input.dispatchEvent(new Event("input")) // vue 双向绑定更新数据
@@ -133,10 +139,11 @@ function input_condition(el) {
 }
 
 function image_condition(el) {
-    return find_attribute(el, "alt", /图片刷新|验证码/gi) ||
+    return find_attribute(el, "alt", /图片刷新|看不清|换一张|验证码/gi) ||
         find_attribute(el, "src", /Validate|captcha|login-code-img/gi) ||
         find_attribute(el, "id", /auth|yanzhengma|yzm|verify|captcha|imgcode/gi) ||
-        find_attribute(el, "class", /login-code|yanzhengma|yzm|code-img|captcha|verify/gi)
+        find_attribute(el, "class", /login-code|yanzhengma|yzm|code-img|captcha|verify/gi)||
+        find_attribute(el, "title", /图片刷新|看不清|换一张|验证码/gi)
 }
 
 function auto_detect_and_fill_captcha(captcha) {
@@ -147,7 +154,7 @@ function auto_detect_and_fill_captcha(captcha) {
     }
     let captcha_inputs = Array.from(document.querySelectorAll("input")).filter(input_condition);
     found_captcha_input = captcha_inputs.length === 0 ? null : captcha_inputs[0];
-    DEBUG && console.log("==auto_detect", captcha_inputs);
+    DEBUG && console.log("==auto_detect", found_captcha_input);
 
     if (captcha_inputs.length === 0) {
         found_captcha_input = get_element_from_iframe(input_condition)
@@ -331,6 +338,7 @@ document.addEventListener('copy', e => {
 })
 
 function find_element(selector) {
+    if (!selector) return
     let node = document.querySelector(selector)
     if (node) return node
     // 没找到,再去找iframe
@@ -486,7 +494,7 @@ window.onload = function () {
         })
 
     let verifycode_ele = Array.from(document.querySelectorAll("img")).filter(image_condition)
-    if (fill_config && fill_config.img) {
+    if (fill_config.selector && fill_config.img) {
         console.log("_______loaded_____ image config", fill_config, verifycode_ele)
         let ele = find_element(fill_config.img);
         // cache img for speed up
@@ -495,7 +503,7 @@ window.onload = function () {
         if (fill_config.target) {
             found_target = find_element(fill_config.target);
         }
-        if (verifycode_ele && ele.tagName !=="CANVAS") {
+        if (verifycode_ele && ele.tagName !== "CANVAS") {
             verifycode_ele.push(ele)
         }
         console.log("_______loaded_____ image very_code_nodes", verifycode_ele)
@@ -551,10 +559,10 @@ function moveSideCaptcha(target, btn, distance) {
 
     console.log("+++++", targetLeft, targetParentLeft, targetTransform, targetParentTransform)
 
-    var  mousedown = document.createEvent("MouseEvents");
-    var  rect = btn.getBoundingClientRect();
-    var  x = rect.x;
-    var  y = rect.y;
+    var mousedown = document.createEvent("MouseEvents");
+    var rect = btn.getBoundingClientRect();
+    var x = rect.x;
+    var y = rect.y;
     mousedown.initMouseEvent(
         "mousedown",
         true,
@@ -576,9 +584,9 @@ function moveSideCaptcha(target, btn, distance) {
     var dx = 0;
     var dy = 0;
     let interval = setInterval(function () {
-        var  mousemove = document.createEvent("MouseEvents");
-        var  _x = x + dx;
-        var  _y = y + dy;
+        var mousemove = document.createEvent("MouseEvents");
+        var _x = x + dx;
+        var _y = y + dy;
         mousemove.initMouseEvent(
             "mousemove",
             true,
@@ -617,7 +625,7 @@ function moveSideCaptcha(target, btn, distance) {
         }
         if (varible >= distance) {
             clearInterval(interval);
-            var  mouseup = document.createEvent("MouseEvents");
+            var mouseup = document.createEvent("MouseEvents");
             mouseup.initMouseEvent(
                 "mouseup",
                 true,

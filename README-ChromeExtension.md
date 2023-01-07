@@ -103,5 +103,6 @@ host,selector[,img-selector][,target-selector]
 - https://shhxf.119.gov.cn/login.jsp?edu=1
 - https://ptce.gx12333.net/
 - https://www.5dy6.cc/user/login.html 数字模式优化
-- http://longbowenterprise.gitee.io/slidercaptcha/ 滑块demo
+- http://longbowenterprise.gitee.io/slidercaptcha/ 滑块demo  自定义规则 longbowenterprise.gitee.io,.slider,#captcha > canvas:nth-child(1),#captcha>canvas.block
+- https://suolink.cn/?from=4003  自定义规则 suolink.cn,input#verificationCode_register
 
