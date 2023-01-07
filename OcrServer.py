@@ -182,10 +182,8 @@ def slide():
             return json.dumps({'code': False, 'msg': 'error'})
         ip = parse_ip(request)
         check_limit(ip)
-        print(request.form)
         if "base64" in request.form:
             b64 = request.form['base64']
-            print(b64)
             b64 = b64[b64.find(',') + 1:]
             target = request.form['target']
             target = target[target.find(',') + 1:]
