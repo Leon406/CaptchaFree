@@ -52,6 +52,10 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
             MODE = data.data
             break;
         case "slide_verify":
+            if (!found_target && fill_config.target) {
+                found_target = find_element(fill_config.target);
+                console.log("_______slide_verify_____ found_target", found_target)
+            }
             if (found_target && found_captcha_img) {
                 let target = found_target.toDataURL()
                 let background = found_captcha_img.toDataURL()
@@ -88,7 +92,7 @@ function debounce(interval = INTERVAL) {
 }
 
 function get_captcha_input(text) {
-    if (fill_config) {
+    if (fill_config.selector) {
         DEBUG && console.info("==fill==", "找到规则@@@", fill_config.selector)
         let ele = find_element(fill_config.selector)
         if (ele) {
@@ -129,21 +133,11 @@ function fill_input(input, text) {
 }
 
 function input_condition(el) {
-    return el.type !== 'hidden' && (
-        find_attribute(el)
-        || find_attribute(el, "id", /validate|veryCode|verify/gi)
-        || find_attribute(el, "alt", "kaptcha")
-        || find_attribute(el, "data-msg-required")
-        || find_attribute(el, "tip")
-    )
+    return el.type !== 'hidden' && (find_attribute(el) || find_attribute(el, "id", /validate|veryCode|verify/gi) || find_attribute(el, "alt", "kaptcha") || find_attribute(el, "data-msg-required") || find_attribute(el, "tip"))
 }
 
 function image_condition(el) {
-    return find_attribute(el, "alt", /图片刷新|看不清|换一张|验证码/gi) ||
-        find_attribute(el, "src", /Validate|captcha|login-code-img/gi) ||
-        find_attribute(el, "id", /auth|yanzhengma|yzm|verify|captcha|imgcode/gi) ||
-        find_attribute(el, "class", /login-code|yanzhengma|yzm|code-img|captcha|verify/gi)||
-        find_attribute(el, "title", /图片刷新|看不清|换一张|验证码/gi)
+    return find_attribute(el, "alt", /图片刷新|看不清|换一张|验证码/gi) || find_attribute(el, "src", /Validate|captcha|check_code|login-code-img/gi) || find_attribute(el, "id", /auth|yanzhengma|yzm|verify|captcha|imgcode/gi) || find_attribute(el, "class", /login-code|yanzhengma|yzm|code-img|captcha|verify/gi) || find_attribute(el, "title", /图片刷新|看不清|换一张|验证码/gi)
 }
 
 function auto_detect_and_fill_captcha(captcha) {
@@ -152,14 +146,9 @@ function auto_detect_and_fill_captcha(captcha) {
         fill_input(found_captcha_input, captcha)
         return
     }
-    let captcha_inputs = Array.from(document.querySelectorAll("input")).filter(input_condition);
-    found_captcha_input = captcha_inputs.length === 0 ? null : captcha_inputs[0];
-    DEBUG && console.log("==auto_detect", found_captcha_input);
 
-    if (captcha_inputs.length === 0) {
-        found_captcha_input = get_element_from_iframe(input_condition)
-        console.log("==auto_detect again", found_captcha_input);
-    }
+    found_captcha_input = get_element_from_iframe(input_condition)
+    DEBUG && console.log("==auto_detect", found_captcha_input);
     if (found_captcha_input) fill_input(found_captcha_input, captcha);
 }
 
@@ -201,23 +190,19 @@ function toast(msg, duration) {
         m.style.webkitTransition = '-webkit-transform ' + d + 's ease-in, opacity ' + d + 's ease-in';
         m.style.opacity = '0';
         setTimeout(() => {
-            Array.from(document.body.children).filter(el => el === m).forEach(
-                el => {
-                    document.body.removeChild(el);
-                    exist_toast = null
-                }
-            );
+            Array.from(document.body.children).filter(el => el === m).forEach(el => {
+                document.body.removeChild(el);
+                exist_toast = null
+            });
 
         }, d * 1000);
     }, duration);
 }
 
 function find_captcha_image_from_iframe(url) {
-    let root_url = get_host(url)
-    let elements = Array.from(document.querySelectorAll("iframe"))
-        .filter(el => root_url === get_host(el.src))
+    let elements = find_all_iframe()
         .map(el => {
-            DEBUG && console.log("find_captcha_image_from_iframe frame", el, el.contentDocument.querySelectorAll("iframe"));
+            DEBUG && console.log("find_captcha_image_from_iframe frame", el);
             return find_captcha_image(url, el.contentDocument)
         })
         .filter(el => el);
@@ -225,49 +210,45 @@ function find_captcha_image_from_iframe(url) {
     return elements && elements[0];
 }
 
-function get_element_from_iframe(cond) {
-    let root_url = window.location.host
-    let elements = Array.from(document.querySelectorAll("iframe"))
-        .filter(el => root_url === get_host(el.src))
-        .flatMap(el => Array.from(el.contentDocument.querySelectorAll("input")))
-        .filter(el => cond(el));
-    if (!elements || elements.length === 0) {
-        DEBUG && console.log("get_element_from_iframe 2")
-        elements = Array.from(document.querySelectorAll("iframe"))
-            .filter(el => root_url === get_host(el.src))
-            .flatMap(el =>
-                Array.from(el.contentDocument.querySelectorAll("iframe"))
-                    .filter(el => root_url === get_host(el.src))
-            )
-            .flatMap(el => Array.from(el.contentDocument.querySelectorAll("input")))
+function get_element_from_iframe(cond, selector = "input") {
+    let elements = get_elements(cond, selector)
+    return elements && elements[0];
+}
+
+function get_elements(cond, selector = "input") {
+    let elements = Array.from(document.querySelectorAll("input")).filter(el => cond(el));
+    if (elements.length === 0) {
+        elements = find_all_iframe()
+            .flatMap(el => Array.from(el.contentDocument.querySelectorAll(selector)))
             .filter(el => cond(el));
     }
+
     DEBUG && console.log("get_element_from_iframe", elements, elements[0]);
-    return elements && elements[0];
+    return elements;
 }
 
 function get_host(url) {
     return new URL(url).host
 }
 
+function find_all_iframe(doc = document) {
+    let root_url = window.location.host
+    let frames = Array.from(doc.querySelectorAll("iframe"))
+        .filter(el => root_url === get_host(el.baseURI))
+    if (frames.length > 0) {
+        let frames2 = frames.flatMap(el => find_all_iframe(el.contentDocument))
+        if (frames2.length > 0) {
+            frames2.forEach(e => frames.push(e))
+        }
+    }
+    return frames;
+}
+
+
 function find_captcha_image(url, doc = document) {
     DEBUG && console.log("_____find_captcha_image_____", url)
     if (!doc) return;
     let elements = Array.from(doc.querySelectorAll("img")).filter(el => el.src.includes(url));
-    // 没有查到,查询doc中iframe
-    DEBUG && console.log("find_captcha 1", elements)
-    if (!elements || elements.length === 0) {
-        DEBUG && console.log("find_captcha_image from iframe", doc.querySelectorAll("iframe"));
-        let root_url = get_host(url)
-        elements = Array.from(doc.querySelectorAll("iframe"))
-            .filter(el => root_url === get_host(el.src))
-            .flatMap(el => {
-                DEBUG && console.log("find_captcha_image from --------", doc.querySelectorAll("iframe"));
-                return Array.from(el.contentDocument.querySelectorAll("img"));
-            })
-            .filter(el => el.src.includes(url));
-        DEBUG && console.log("find_captcha iframe rr", elements);
-    }
     return elements && elements[0];
 }
 
@@ -342,14 +323,14 @@ function find_element(selector) {
     let node = document.querySelector(selector)
     if (node) return node
     // 没找到,再去找iframe
-    let iframes = document.querySelectorAll("iframe");
-    for (let iframe of iframes) {
-        DEBUG && console.log("iframe", iframe);
-        let ele = iframe.contentDocument.querySelector(selector);
-        if (ele) {
-            DEBUG && console.info("gotcha iframe", iframe);
-            return ele;
-        }
+    let root_url = window.location.host
+    let nodes = Array.from(document.querySelectorAll("iframe"))
+        .filter(el => root_url === get_host(el.src))
+        .map(el => el.contentDocument.querySelector(selector))
+        .filter(el => el)
+    if (nodes.length > 0) {
+        DEBUG && console.info("gotcha iframe", nodes[0]);
+        node = nodes[0];
     }
     return node;
 }
@@ -382,15 +363,12 @@ function parse_config(config) {
 }
 
 function free_edit() {
-    "true" === document.body.getAttribute("contenteditable") ? (
-            document.body.setAttribute("contenteditable", !1), alert("网页不能编辑啦！"))
-        : (document.body.setAttribute("contenteditable", !0), alert("网页可以编辑啦！"))
+    "true" === document.body.getAttribute("contenteditable") ? (document.body.setAttribute("contenteditable", !1), alert("网页不能编辑啦！")) : (document.body.setAttribute("contenteditable", !0), alert("网页可以编辑啦！"))
 }
 
 function remove_restrict() {
     let t = function (t) {
-        t.stopPropagation(),
-        t.stopImmediatePropagation && t.stopImmediatePropagation()
+        t.stopPropagation(), t.stopImmediatePropagation && t.stopImmediatePropagation()
     };
     ["copy", "cut", "contextmenu", "selectstart", "mousedown", "mouseup", "keydown", "keypress", "keyup"]
         .forEach(function (e) {
@@ -449,8 +427,7 @@ function post_process_captcha(text) {
     switch (MODE) {
         case "num":
             tmp = tmp
-                .replaceAll("O", "0")
-                .replaceAll(/[ouOD。口]/gi, "0")
+                .replaceAll(/[ouOD。Q口]/g, "0")
                 .replaceAll(/[，,\-li]/g, "1")
                 .replaceAll(/[己已="]/g, "2")
                 .replaceAll("a", "3")
@@ -493,15 +470,16 @@ window.onload = function () {
             console.log("mode", MODE)
         })
 
-    let verifycode_ele = Array.from(document.querySelectorAll("img")).filter(image_condition)
+    let verifycode_ele = get_elements(image_condition, "img")
+    console.log("_______loaded_____ image config", fill_config, verifycode_ele)
     if (fill_config.selector && fill_config.img) {
-        console.log("_______loaded_____ image config", fill_config, verifycode_ele)
         let ele = find_element(fill_config.img);
         // cache img for speed up
         found_captcha_img = ele
         found_captcha_input = find_element(fill_config.selector);
         if (fill_config.target) {
             found_target = find_element(fill_config.target);
+            console.log("_______loaded_____ found_target", found_target)
         }
         if (verifycode_ele && ele.tagName !== "CANVAS") {
             verifycode_ele.push(ele)
@@ -512,30 +490,23 @@ window.onload = function () {
     chrome.storage.sync.get({"reco_on_load": false})
         .then(config => {
             verifycode_ele.forEach(el => {
-                    very_code_nodes.push(el)
-                    listen(el)
-                    DEBUG && console.log("_______add click_____", el)
-                    if (config.reco_on_load) {
-                        if (el.height > 200) {
-                            toast("你确定这是验证码?")
-                        } else {
-                            chrome.runtime.sendMessage(drawBase64Image(el));
-                        }
+                very_code_nodes.push(el)
+                listen(el)
+                DEBUG && console.log("_______add click_____", el)
+                if (config.reco_on_load) {
+                    if (el.height > 200) {
+                        toast("你确定这是验证码?")
+                    } else {
+                        chrome.runtime.sendMessage(drawBase64Image(el));
                     }
                 }
-            )
+            })
         })
 }
 
 function getEleTransform(el) {
     const style = window.getComputedStyle(el, null);
-    let transform =
-        style.getPropertyValue("-webkit-transform") ||
-        style.getPropertyValue("-moz-transform") ||
-        style.getPropertyValue("-ms-transform") ||
-        style.getPropertyValue("-o-transform") ||
-        style.getPropertyValue("transform") ||
-        "null";
+    let transform = style.getPropertyValue("-webkit-transform") || style.getPropertyValue("-moz-transform") || style.getPropertyValue("-ms-transform") || style.getPropertyValue("-o-transform") || style.getPropertyValue("transform") || "null";
     return transform && transform.split(",")[4];
 }
 
@@ -544,104 +515,52 @@ function moveSideCaptcha(target, btn, distance) {
         console.log("distance", distance);
         return;
     }
-    let varible = null;
+    let variable = null;
     let targetStyle = window.getComputedStyle(target, null);
-    let targetLeft =
-        Number(targetStyle.left.replace("px", "")) || 0;
+    let targetLeft = Number(targetStyle.left.replace("px", "")) || 0;
     let targetParentStyle = window.getComputedStyle(target.parentNode, null);
-    let targetParentLeft =
-        Number(targetParentStyle.left.replace("px", "")) || 0;
+    let targetParentLeft = Number(targetParentStyle.left.replace("px", "")) || 0;
     let transform = getEleTransform(target);
     let targetTransform = Number(transform) || 0;
-    let parentTranform = getEleTransform(target.parentNode);
-    let targetParentTransform =
-        Number(parentTranform) || 0;
+    let parentTransform = getEleTransform(target.parentNode);
+    let targetParentTransform = Number(parentTransform) || 0;
 
     console.log("+++++", targetLeft, targetParentLeft, targetTransform, targetParentTransform)
 
-    var mousedown = document.createEvent("MouseEvents");
-    var rect = btn.getBoundingClientRect();
-    var x = rect.x;
-    var y = rect.y;
-    mousedown.initMouseEvent(
-        "mousedown",
-        true,
-        true,
-        document.defaultView,
-        0,
-        x,
-        y,
-        x,
-        y,
-        false,
-        false,
-        false,
-        false,
-        0,
-        null);
-    btn.dispatchEvent(mousedown);
+    let rect = btn.getBoundingClientRect();
+    let x = rect.x;
+    let y = rect.y;
 
-    var dx = 0;
-    var dy = 0;
+    btn.dispatchEvent(mouseEvent("mousedown", x, y));
+
+    let dx = 0;
+    let dy = 0;
     let interval = setInterval(function () {
-        var mousemove = document.createEvent("MouseEvents");
-        var _x = x + dx;
-        var _y = y + dy;
-        mousemove.initMouseEvent(
-            "mousemove",
-            true,
-            true,
-            document.defaultView,
-            0,
-            _x,
-            _y,
-            _x,
-            _y,
-            false,
-            false,
-            false,
-            false,
-            0,
-            null);
+        let _x = x + dx;
+        let _y = y + dy;
+        let mousemove = mouseEvent("mousemove", _x, -_y)
         btn.dispatchEvent(mousemove);
         btn.dispatchEvent(mousemove);
 
-        let newTargetLeft =
-            Number(targetStyle.left.replace("px", "")) || 0;
-        let newTargetParentLeft =
-            Number(targetParentStyle.left.replace("px", "")) || 0;
+        let newTargetLeft = Number(targetStyle.left.replace("px", "")) || 0;
+        let newTargetParentLeft = Number(targetParentStyle.left.replace("px", "")) || 0;
         let newTargetTransform = Number(transform) || 0;
-        let newTargetParentTransform =
-            Number(parentTranform) || 0;
+        let newTargetParentTransform = Number(parentTransform) || 0;
+        console.log("mouse event diff", newTargetLeft - targetLeft, newTargetParentLeft - targetParentLeft, newTargetTransform - targetTransform, newTargetParentTransform - targetParentTransform)
 
         if (newTargetLeft !== targetLeft) {
-            varible = newTargetLeft;
+            variable = newTargetLeft;
         } else if (newTargetParentLeft !== targetParentLeft) {
-            varible = newTargetParentLeft;
+            variable = newTargetParentLeft;
         } else if (newTargetTransform !== targetTransform) {
-            varible = newTargetTransform;
+            variable = newTargetTransform;
         } else if (newTargetParentTransform !== targetParentTransform) {
-            varible = newTargetParentTransform;
+            variable = newTargetParentTransform;
         }
-        if (varible >= distance) {
+        if (variable >= distance) {
+            console.log("mouse event variable", variable, distance)
             clearInterval(interval);
-            var mouseup = document.createEvent("MouseEvents");
-            mouseup.initMouseEvent(
-                "mouseup",
-                true,
-                true,
-                document.defaultView,
-                0,
-                _x,
-                _y,
-                _x,
-                _y,
-                false,
-                false,
-                false,
-                false,
-                0,
-                null);
+            let mouseup = mouseEvent("mouseup", _x, _y);
             setTimeout(() => {
                 btn.dispatchEvent(mouseup);
             }, Math.ceil(Math.random() * 2000));
@@ -658,6 +577,15 @@ function moveSideCaptcha(target, btn, distance) {
     setTimeout(() => {
         clearInterval(interval);
     }, 10000);
+}
+
+function mouseEvent(type, screenX, screenY, clientX, clientY) {
+    let mouseEvent = document.createEvent("MouseEvents");
+    mouseEvent.initMouseEvent(type, true, true, document.defaultView, 0,
+        screenX, screenY, clientX || screenX, clientY || screenY,
+        false, false, false, false, 0, null);
+
+    return mouseEvent
 }
 
 
