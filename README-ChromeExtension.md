@@ -106,7 +106,7 @@ host,selector[,img-selector][,target-selector]
 - https://suolink.cn/?from=4003  自定义规则 suolink.cn,input#verificationCode_register
 
 
-滑块
+滑块 (浏览器限制,不支持iframe跨域,暂时只有简单的demo)
 -  https://dun.163.com/trial/sense
 -  http://longbowenterprise.gitee.io/slidercaptcha/ 滑块demo  自定义规则 longbowenterprise.gitee.io,.slider,#captcha > canvas:nth-child(1),#captcha>canvas.block
 
