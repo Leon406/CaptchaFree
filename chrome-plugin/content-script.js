@@ -1,5 +1,10 @@
-let last_time = 0
 const INTERVAL = 2000
+const image_url_reg = /https?:\/\/.*\.(png|jpg|jpeg|gif)\b.*/ig
+const very_code_nodes = []
+// Firefox和Chrome早期版本中带有前缀
+const MutationObserver = window.MutationObserver || window.WebKitMutationObserver || window.MozMutationObserver
+
+let last_time = 0
 let DEBUG = false
 let MODE
 // 避免多次查询,提升性能
@@ -7,6 +12,7 @@ let found_captcha_img
 let found_captcha_input
 let found_target
 let exist_toast
+let fill_config = {}
 
 // 监听 background 传来的数据 可对页面dom操作
 chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
@@ -23,7 +29,7 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
             toast(data.data.message)
             break;
         case "base64":
-            found_captcha_img = found_captcha_img || get_one_element(el => el.src.includes(data.data.srcUr), "img");
+            found_captcha_img = found_captcha_img || get_one_element("img", el => el.src.includes(data.data.srcUrl));
             DEBUG && console.log("gotcha img ", found_captcha_img)
             if (!found_captcha_img) {
                 toast("未找到验证码图片!!!")
@@ -52,10 +58,7 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
             MODE = data.data
             break;
         case "slide_verify":
-            if (!found_target && fill_config.target) {
-                found_target = find_element(fill_config.target);
-                console.log("_______slide_verify_____ found_target", found_target)
-            }
+            check_slide_nodes();
             if (found_target && found_captcha_img) {
                 let target = found_target.toDataURL()
                 let background = found_captcha_img.toDataURL()
@@ -81,6 +84,110 @@ chrome.storage.sync.get({"rule": ""})
         parse_config(config.rule)
     })
 
+//监听整个页面的 paste 事件, chrome只能监听文本
+document.addEventListener('paste', e => {
+    let clipboardData = window.clipboardData || e.clipboardData;
+    if (!clipboardData) return;
+    let type = clipboardData.items[0] && clipboardData.items[0].type;
+    if (type && type.match(/image/)) {
+        let blob = clipboardData.items[0].getAsFile();
+        let file = new FileReader();
+        file.addEventListener('loadend', e => {
+            DEBUG && console.log("paste data", e.target.result)
+            chrome.runtime.sendMessage(e.target.result);
+        });
+        file.readAsDataURL(blob);
+    }
+})
+
+//监听整个页面的 copy 事件,只能监听文本,图片链接
+document.addEventListener('copy', e => {
+    chrome.storage.sync.get({"copy_reco": false})
+        .then(config => {
+            if (config.copy_reco) {
+                let clipboardData = window.clipboardData || e.clipboardData;
+                if (!clipboardData) return;
+                let text = window.getSelection().toString();
+                if (text) {
+                    console.info("copy text", text)
+                    if (text.startsWith("data:image") || image_url_reg.test(text)) {
+                        chrome.runtime.sendMessage(text);
+                    }
+                }
+            }
+        })
+})
+
+window.onload = function () {
+    chrome.storage.sync.get({"debug": false})
+        .then(config => {
+            DEBUG = config.debug
+            console.log("debug", DEBUG)
+        })
+
+    chrome.storage.sync.get({"mode": "mix"})
+        .then(config => {
+            MODE = config.mode
+            DEBUG && console.log("mode", MODE)
+        })
+
+    let verifycode_ele = get_elements("img", image_condition)
+    console.log("_______loaded_____ image config", fill_config, verifycode_ele)
+    if (fill_config.selector && fill_config.img) {
+        let ele = get_one_element(fill_config.img);
+        // cache img for speed up
+        found_captcha_img = ele
+        found_captcha_input = get_one_element(fill_config.selector);
+        check_slide_nodes()
+        if (verifycode_ele && ele.tagName !== "CANVAS") {
+            verifycode_ele.push(ele)
+        }
+        console.log("_______loaded_____ image very_code_nodes", verifycode_ele)
+    }
+    DEBUG && console.log("_______loaded_____ find", verifycode_ele)
+    chrome.storage.sync.get({"reco_on_load": false})
+        .then(config => {
+            verifycode_ele.forEach(el => {
+                very_code_nodes.push(el)
+                listen(el)
+                DEBUG && console.log("_______add click_____", el)
+                if (config.reco_on_load) {
+                    if (el.height > 200) {
+                        toast("你确定这是验证码?")
+                    } else {
+                        chrome.runtime.sendMessage(drawBase64Image(el));
+                    }
+                }
+            })
+        })
+}
+
+function input_condition(el) {
+    return el.type !== 'hidden' && (find_attribute(el)
+        || find_attribute(el, "id", /validate|veryCode|verify/gi)
+        || find_attribute(el, "alt", "kaptcha")
+        || find_attribute(el, "data-msg-required")
+        || find_attribute(el, "tip"))
+}
+
+function image_condition(el) {
+    return find_attribute(el, "alt", /图片刷新|看不清|换一张|验证码/gi)
+        || find_attribute(el, "src", /Validate|captcha|checkcode|check_code|login-code-img/gi)
+        || find_attribute(el, "id", /auth|yanzhengma|yzm|verify|captcha|imgcode/gi)
+        || find_attribute(el, "class", /login-code|yanzhengma|yzm|code-img|captcha|verify/gi)
+        || find_attribute(el, "title", /图片刷新|看不清|换一张|验证码/gi)
+}
+
+function check_slide_nodes() {
+    if (!found_target && fill_config.target) {
+        console.log("_______slide_verify_____ ftarget", fill_config.target)
+        found_target = get_one_element(fill_config.target);
+        console.log("_______slide_verify_____ found_target", found_target)
+        found_captcha_img = found_captcha_img || get_one_element(fill_config.img)
+        found_captcha_input = found_captcha_input || get_one_element(fill_config.selector);
+    }
+}
+
 function debounce(interval = INTERVAL) {
     let now = Date.now();
     interval = DEBUG ? interval / 5 : interval
@@ -94,7 +201,7 @@ function debounce(interval = INTERVAL) {
 function get_captcha_input(text) {
     if (fill_config.selector) {
         DEBUG && console.info("==fill==", "找到规则@@@", fill_config.selector)
-        let ele = find_element(fill_config.selector)
+        let ele = get_one_element(fill_config.selector)
         if (ele) {
             DEBUG && console.info("==fill==", "找到节点并填写!!!", ele)
             fill_input(ele, text);
@@ -132,14 +239,6 @@ function fill_input(input, text) {
     input.dispatchEvent(new Event("input")) // vue 双向绑定更新数据
 }
 
-function input_condition(el) {
-    return el.type !== 'hidden' && (find_attribute(el) || find_attribute(el, "id", /validate|veryCode|verify/gi) || find_attribute(el, "alt", "kaptcha") || find_attribute(el, "data-msg-required") || find_attribute(el, "tip"))
-}
-
-function image_condition(el) {
-    return find_attribute(el, "alt", /图片刷新|看不清|换一张|验证码/gi) || find_attribute(el, "src", /Validate|captcha|check_code|login-code-img/gi) || find_attribute(el, "id", /auth|yanzhengma|yzm|verify|captcha|imgcode/gi) || find_attribute(el, "class", /login-code|yanzhengma|yzm|code-img|captcha|verify/gi) || find_attribute(el, "title", /图片刷新|看不清|换一张|验证码/gi)
-}
-
 function auto_detect_and_fill_captcha(captcha) {
     if (found_captcha_input) {
         DEBUG && console.log("==auto_detect", "got input!!!");
@@ -147,11 +246,10 @@ function auto_detect_and_fill_captcha(captcha) {
         return
     }
 
-    found_captcha_input = get_one_element(input_condition)
+    found_captcha_input = get_one_element("input", input_condition)
     DEBUG && console.log("==auto_detect", found_captcha_input);
     if (found_captcha_input) fill_input(found_captcha_input, captcha);
 }
-
 
 // 获取placeholder="验证码" ,  alt="kaptcha"
 function find_attribute(element, attr = "placeholder", val = "验证码", eq = false) {
@@ -199,31 +297,27 @@ function toast(msg, duration) {
     }, duration);
 }
 
-function get_one_element(cond = el => el, selector = "input") {
-    let elements = get_elements(cond, selector)
+function get_one_element(selector = "input", cond = el => el) {
+    let elements = get_elements(selector, cond)
     return elements && elements[0];
 }
 
-function get_elements(cond = el => el, selector = "input") {
-    let elements = Array.from(document.querySelectorAll(selector)).filter(el => cond(el));
+function get_elements(selector = "input", cond = el => el) {
+    let elements = Array.from(document.querySelectorAll(selector)).filter(cond);
     if (elements.length === 0) {
         elements = find_all_iframe()
             .flatMap(el => Array.from(el.contentDocument.querySelectorAll(selector)))
             .filter(el => cond(el));
     }
-
-    DEBUG && console.log("get_one_element", elements, elements[0]);
+    DEBUG && console.log("get_elements", selector, cond, elements, elements[0]);
     return elements;
 }
 
-function get_host(url) {
-    return new URL(url).host
-}
-
 function find_all_iframe(doc = document) {
-    let root_url = window.location.host
-    let frames = Array.from(doc.querySelectorAll("iframe"))
-        .filter(el => root_url === get_host(el.baseURI))
+    let frame = doc.querySelectorAll("iframe");
+    if (frame.length === 0) return [];
+    let frames = Array.from(frame)
+        .filter(el => el.contentDocument)
     if (frames.length > 0) {
         let frames2 = frames.flatMap(el => find_all_iframe(el.contentDocument))
         if (frames2.length > 0) {
@@ -263,50 +357,6 @@ function drawBase64Image(img) {
     return dataURL;
 }
 
-
-//监听整个页面的 paste 事件, chrome只能监听文本
-document.addEventListener('paste', e => {
-    let clipboardData = window.clipboardData || e.clipboardData;
-    if (!clipboardData) return;
-    let type = clipboardData.items[0] && clipboardData.items[0].type;
-    if (type && type.match(/image/)) {
-        let blob = clipboardData.items[0].getAsFile();
-        let file = new FileReader();
-        file.addEventListener('loadend', e => {
-            DEBUG && console.log("paste data", e.target.result)
-            chrome.runtime.sendMessage(e.target.result);
-        });
-        file.readAsDataURL(blob);
-    }
-})
-
-const image_url_reg = /https?:\/\/.*\.(png|jpg|jpeg|gif)\b.*/ig
-//监听整个页面的 copy 事件,只能监听文本,图片链接
-document.addEventListener('copy', e => {
-    chrome.storage.sync.get({"copy_reco": false})
-        .then(config => {
-            if (config.copy_reco) {
-                let clipboardData = window.clipboardData || e.clipboardData;
-                if (!clipboardData) return;
-                let text = window.getSelection().toString();
-                if (text) {
-                    console.info("copy text", text)
-                    if (text.startsWith("data:image") || image_url_reg.test(text)) {
-                        chrome.runtime.sendMessage(text);
-                    }
-                }
-            }
-        })
-})
-
-function find_element(selector) {
-    if (!selector) return;
-    return get_one_element(el => el, selector);
-}
-
-let fill_config = {}
-
-// "domain,selector[,img-selector]"
 function parse_config(config) {
     DEBUG && console.log("解析规则:", config)
     fill_config = {}
@@ -324,6 +374,7 @@ function parse_config(config) {
             let img = info.length >= 3 ? info[2] : ''
             let target = info.length >= 4 ? info[3] : ''
             fill_config = {selector, img, target}
+            check_slide_nodes()
         } else {
             DEBUG && console.log("配置错误:", items[i])
         }
@@ -356,10 +407,6 @@ function copy_cookie() {
     alert('复制成功');
 }
 
-const very_code_nodes = []
-// Firefox和Chrome早期版本中带有前缀
-const MutationObserver = window.MutationObserver || window.WebKitMutationObserver || window.MozMutationObserver
-
 function listen(ele) {
     console.log("listen", ele);
     let observer = new MutationObserver(function (mutations) {
@@ -388,7 +435,6 @@ function listen(ele) {
     let config = {attributes: true, attributeFilter: ["src"], childList: true, characterData: true}
     observer.observe(ele, config);
 }
-
 
 function post_process_captcha(text) {
     let tmp = text
@@ -423,54 +469,6 @@ function post_process_captcha(text) {
         console.log("post_process_captcha", text, "==>", tmp);
     }
     return tmp;
-}
-
-
-window.onload = function () {
-    chrome.storage.sync.get({"debug": false})
-        .then(config => {
-            DEBUG = config.debug
-            console.log("debug", DEBUG)
-        })
-
-    chrome.storage.sync.get({"mode": "mix"})
-        .then(config => {
-            MODE = config.mode
-            DEBUG && console.log("mode", MODE)
-        })
-
-    let verifycode_ele = get_elements(image_condition, "img")
-    console.log("_______loaded_____ image config", fill_config, verifycode_ele)
-    if (fill_config.selector && fill_config.img) {
-        let ele = find_element(fill_config.img);
-        // cache img for speed up
-        found_captcha_img = ele
-        found_captcha_input = find_element(fill_config.selector);
-        if (fill_config.target) {
-            found_target = find_element(fill_config.target);
-            console.info("===>found_target", found_target)
-        }
-        if (verifycode_ele && ele.tagName !== "CANVAS") {
-            verifycode_ele.push(ele)
-        }
-        console.log("_______loaded_____ image very_code_nodes", verifycode_ele)
-    }
-    DEBUG && console.log("_______loaded_____ find", verifycode_ele)
-    chrome.storage.sync.get({"reco_on_load": false})
-        .then(config => {
-            verifycode_ele.forEach(el => {
-                very_code_nodes.push(el)
-                listen(el)
-                DEBUG && console.log("_______add click_____", el)
-                if (config.reco_on_load) {
-                    if (el.height > 200) {
-                        toast("你确定这是验证码?")
-                    } else {
-                        chrome.runtime.sendMessage(drawBase64Image(el));
-                    }
-                }
-            })
-        })
 }
 
 function getEleTransform(el) {

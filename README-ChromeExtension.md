@@ -87,7 +87,7 @@ host,selector[,img-selector][,target-selector]
 - https://club.excelhome.net/forum.php
 - https://www.cdjxjy.com/teacherlogin.aspx
 - https://www.wzjxjy.cn/personal-register
-- https://aemd-lims.sjtu.edu.cn/  iframe
+- https://aemd-lims.sjtu.edu.cn/  iframe 同域支持自动填写
 - https://jdkd.ulifego.com/#/login
 - https://www.wyzc.com/User/Login/indexAction  截屏识别
 - http://121.199.21.190/wui/theme/ecology8/page/login.jsp
