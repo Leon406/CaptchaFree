@@ -23,7 +23,7 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
             toast(data.data.message)
             break;
         case "base64":
-            found_captcha_img = found_captcha_img || find_captcha_image(data.data.srcUrl) || find_captcha_image_from_iframe(data.data.srcUrl);
+            found_captcha_img = found_captcha_img || get_one_element(el => el.src.includes(data.data.srcUr), "img");
             DEBUG && console.log("gotcha img ", found_captcha_img)
             if (!found_captcha_img) {
                 toast("未找到验证码图片!!!")
@@ -147,7 +147,7 @@ function auto_detect_and_fill_captcha(captcha) {
         return
     }
 
-    found_captcha_input = get_element_from_iframe(input_condition)
+    found_captcha_input = get_one_element(input_condition)
     DEBUG && console.log("==auto_detect", found_captcha_input);
     if (found_captcha_input) fill_input(found_captcha_input, captcha);
 }
@@ -199,31 +199,20 @@ function toast(msg, duration) {
     }, duration);
 }
 
-function find_captcha_image_from_iframe(url) {
-    let elements = find_all_iframe()
-        .map(el => {
-            DEBUG && console.log("find_captcha_image_from_iframe frame", el);
-            return find_captcha_image(url, el.contentDocument)
-        })
-        .filter(el => el);
-    DEBUG && console.log("find_captcha_image_from_iframe", elements, url)
-    return elements && elements[0];
-}
-
-function get_element_from_iframe(cond, selector = "input") {
+function get_one_element(cond = el => el, selector = "input") {
     let elements = get_elements(cond, selector)
     return elements && elements[0];
 }
 
-function get_elements(cond, selector = "input") {
-    let elements = Array.from(document.querySelectorAll("input")).filter(el => cond(el));
+function get_elements(cond = el => el, selector = "input") {
+    let elements = Array.from(document.querySelectorAll(selector)).filter(el => cond(el));
     if (elements.length === 0) {
         elements = find_all_iframe()
             .flatMap(el => Array.from(el.contentDocument.querySelectorAll(selector)))
             .filter(el => cond(el));
     }
 
-    DEBUG && console.log("get_element_from_iframe", elements, elements[0]);
+    DEBUG && console.log("get_one_element", elements, elements[0]);
     return elements;
 }
 
@@ -242,14 +231,6 @@ function find_all_iframe(doc = document) {
         }
     }
     return frames;
-}
-
-
-function find_captcha_image(url, doc = document) {
-    DEBUG && console.log("_____find_captcha_image_____", url)
-    if (!doc) return;
-    let elements = Array.from(doc.querySelectorAll("img")).filter(el => el.src.includes(url));
-    return elements && elements[0];
 }
 
 function drawBase64Image(img) {
@@ -319,20 +300,8 @@ document.addEventListener('copy', e => {
 })
 
 function find_element(selector) {
-    if (!selector) return
-    let node = document.querySelector(selector)
-    if (node) return node
-    // 没找到,再去找iframe
-    let root_url = window.location.host
-    let nodes = Array.from(document.querySelectorAll("iframe"))
-        .filter(el => root_url === get_host(el.src))
-        .map(el => el.contentDocument.querySelector(selector))
-        .filter(el => el)
-    if (nodes.length > 0) {
-        DEBUG && console.info("gotcha iframe", nodes[0]);
-        node = nodes[0];
-    }
-    return node;
+    if (!selector) return;
+    return get_one_element(el => el, selector);
 }
 
 let fill_config = {}
@@ -467,7 +436,7 @@ window.onload = function () {
     chrome.storage.sync.get({"mode": "mix"})
         .then(config => {
             MODE = config.mode
-            console.log("mode", MODE)
+            DEBUG && console.log("mode", MODE)
         })
 
     let verifycode_ele = get_elements(image_condition, "img")
@@ -479,7 +448,7 @@ window.onload = function () {
         found_captcha_input = find_element(fill_config.selector);
         if (fill_config.target) {
             found_target = find_element(fill_config.target);
-            console.log("_______loaded_____ found_target", found_target)
+            console.info("===>found_target", found_target)
         }
         if (verifycode_ele && ele.tagName !== "CANVAS") {
             verifycode_ele.push(ele)
@@ -587,5 +556,3 @@ function mouseEvent(type, screenX, screenY, clientX, clientY) {
 
     return mouseEvent
 }
-
-
