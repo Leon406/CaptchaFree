@@ -36,7 +36,7 @@ chrome.runtime.onMessage.addListener((data, sender, sendResponse) => {
                 return
             }
             // 限制验证码图片高度, 防止滥用, 排除宽小于等于高
-            if (found_captcha_img.height > 200 || found_captcha_img.height >= found_captcha_img.width) {
+            if (found_captcha_img.height > 200 || found_captcha_img.height >= found_captcha_img.width || found_captcha_img.width < 60) {
                 toast("你确定这是验证码?")
             } else {
                 sendResponse(drawBase64Image(found_captcha_img));
@@ -149,6 +149,10 @@ window.onload = function () {
         .then(config => {
             verifycode_ele.forEach(el => {
                 very_code_nodes.push(el)
+                if (el.height > 200 || el.width < 60 || el.height >= el.width) {
+                    DEBUG && console.log("自动识别到非法验证码图片", el)
+                    return
+                }
                 listen(el)
                 DEBUG && console.log("_______add click_____", el)
                 if (config.reco_on_load) {
