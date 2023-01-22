@@ -5,7 +5,6 @@
 
 import base64
 import configparser
-import json
 import logging
 import os
 import platform
@@ -16,6 +15,8 @@ import time
 import ddddocr
 import requests
 from flask import Flask, request
+
+debug = False
 
 # ImportError: libGL.so 解决方案  https://www.cnblogs.com/mrneojeep/p/16252044.html
 # ubuntu
@@ -129,10 +130,10 @@ def reset_limit(ip):
 def ocr():
     try:
         if "x-requested-with" not in request.headers and "X-Requested-With" not in request.headers:
-            return json.dumps({'code': False, 'msg': '请求错误'})
+            return {'code': False, 'msg': '请求错误'}
         xrw = request.headers.getlist("x-requested-with") or request.headers.getlist("X-Requested-With")
         if xrw[0] != "XMLHttpRequest":
-            return json.dumps({'code': False, 'msg': 'error'})
+            return {'code': False, 'msg': 'error'}
         ip = parse_ip(request)
         check_limit(ip)
         if "base64" in request.form:
@@ -152,7 +153,7 @@ def ocr():
                 if int(length) < 64 * 1024:
                     return classify(requests.get(request.form['url'], timeout=3).content, ip)
                 else:
-                    return json.dumps({'code': False, 'msg': '文件大于64k'})
+                    return {'code': False, 'msg': '文件大于64k'}
             else:
                 return classify(requests.get(request.form['url'], timeout=3).content, ip)
 
@@ -161,14 +162,14 @@ def ocr():
             filename = file.filename
             # 判断是不是图片
             if filename.split('.')[-1].lower() not in ['jpg', 'png', 'jpeg']:
-                return json.dumps({'code': False, 'msg': '这不是有效的图片'})
+                return {'code': False, 'msg': '这不是有效的图片'}
         else:
-            return json.dumps({'code': False, 'msg': '服务器错误'})
+            return {'code': False, 'msg': '服务器错误'}
 
         return classify(file.read(), ip)
     except Exception as e:
         logger.error(e)
-        return json.dumps({'status': False, 'msg': str(e)})
+        return {'status': False, 'msg': str(e)}
 
 
 # 支持 参数 url, base64,file
@@ -176,10 +177,10 @@ def ocr():
 def slide():
     try:
         if "x-requested-with" not in request.headers and "X-Requested-With" not in request.headers:
-            return json.dumps({'code': False, 'msg': '请求错误'})
+            return {'code': False, 'msg': '请求错误'}
         xrw = request.headers.getlist("x-requested-with") or request.headers.getlist("X-Requested-With")
         if xrw[0] != "XMLHttpRequest":
-            return json.dumps({'code': False, 'msg': 'error'})
+            return {'code': False, 'msg': 'error'}
         ip = parse_ip(request)
         check_limit(ip)
         if "base64" in request.form:
@@ -206,14 +207,14 @@ def slide():
                                        requests.get(request.form['target'], timeout=3).content,
                                        ip)
                 else:
-                    return json.dumps({'code': False, 'msg': '文件大于640k'})
+                    return {'code': False, 'msg': '文件大于640k'}
             else:
                 return slide_match(requests.get(request.form['url'], timeout=3).content,
                                    requests.get(request.form['target'], timeout=3).content,
                                    ip)
     except Exception as e:
         logger.error(e)
-        return json.dumps({'status': False, 'msg': str(e)})
+        return {'status': False, 'msg': str(e)}
 
 
 @app.route('/unlock/<unlock_ip>', methods=['PUT'])
@@ -223,9 +224,9 @@ def unlock(unlock_ip):
         black_users.remove(unlock_ip)
         reset_limit(unlock_ip)
         logger.info(f"after unlock black {RESTRICT_USERS}")
-        return json.dumps({'status': True, 'msg': "unlock success", 'ip': ip})
+        return {'status': True, 'msg': "unlock success", 'ip': ip}
     else:
-        return json.dumps({'status': False, 'msg': "Server Error!", 'ip': ip})
+        return {'status': False, 'msg': "Server Error!", 'ip': ip}
 
 
 @app.route('/rate/<rate_count>', methods=['PUT'])
@@ -233,7 +234,7 @@ def rate(rate_count):
     ip = parse_ip(request)
     rate_count = int(rate_count)
     if rate_count < 0:
-        return json.dumps({'status': False, 'msg': "wrong rate", 'ip': ip})
+        return {'status': False, 'msg': "wrong rate", 'ip': ip}
     else:
         global RATE_LIMIT
         # 不限制,
@@ -242,24 +243,24 @@ def rate(rate_count):
         if ip in white_ips and rate_count != RATE_LIMIT:
             logger.info(f"old= {RATE_LIMIT}, new= {rate_count}")
             RATE_LIMIT = rate_count
-            return json.dumps({'status': True, 'msg': "success", 'ip': ip, 'rate': RATE_LIMIT})
+            return {'status': True, 'msg': "success", 'ip': ip, 'rate': RATE_LIMIT}
         else:
-            return json.dumps({'status': False, 'msg': "sever error", 'ip': ip, 'rate': RATE_LIMIT})
+            return {'status': False, 'msg': "sever error", 'ip': ip, 'rate': RATE_LIMIT}
 
 
 @app.route('/users', methods=['GET'])
 def user():
-    return json.dumps({'status': True,
-                       'msg': "Success",
-                       'user': USERS,
-                       'restrict': RESTRICT_USERS,
-                       'black': list(black_users)})
+    return {'status': True,
+            'msg': "Success",
+            'user': USERS,
+            'restrict': RESTRICT_USERS,
+            'black': list(black_users)}
 
 
 def classify(content, ip):
     i = get_ddddocr()
     if i == -1:
-        return json.dumps({'status': False, 'msg': '没有空闲的OCR线程'})
+        return {'status': False, 'msg': '没有空闲的OCR线程'}
 
     logger.debug(f"已调度线程 {i}")
     start = time.time()
@@ -267,8 +268,8 @@ def classify(content, ip):
         data = post_process(ddddocr_list[i].classification(content))
         logger.info(f"reco==> {data}")
         end = time.time()
-        return json.dumps({'status': True, 'msg': 'SUCCESS', 'result': data, 't': round(end - start, 3), 'ip': ip,
-                           'remain': RATE_LIMIT - USERS[ip]["count"]})
+        return {'status': True, 'msg': 'SUCCESS', 'result': data, 't': round(end - start, 3), 'ip': ip,
+                'remain': RATE_LIMIT - USERS[ip]["count"]}
     except Exception as e:
         logger.error(f"线程{i} {e}")
     finally:
@@ -282,8 +283,8 @@ def slide_match(background, target, ip):
         res = det.slide_match(target, background)
         logger.info(f"reco==> {res}")
         end = time.time()
-        return json.dumps({'status': True, 'msg': 'SUCCESS', 'result': res, 't': round(end - start, 3), 'ip': ip,
-                           'remain': RATE_LIMIT - USERS[ip]["count"]})
+        return {'status': True, 'msg': 'SUCCESS', 'result': res, 't': round(end - start, 3), 'ip': ip,
+                'remain': RATE_LIMIT - USERS[ip]["count"]}
     except Exception as e:
         logger.error(f"线程 {e}")
 
@@ -319,17 +320,18 @@ def post_process(data: str) -> str:
 if __name__ == '__main__':
     threading.Thread(target=init).start()
     # 原生不支持多线程,调试使用
-    # app.run(host=service['listen'], port=service['port'], debug=False)
+    if debug:
+        app.run(host=service['listen'], port=service['port'], debug=False)
+    else:
+        # 改用waitress WSGI
+        from waitress import serve
+        serve(app, host=service['listen'], port=int(service['port']))
 
     # gevent WSGI方式, 必须在最顶部导包并patch, monkey.patch_all(),否则会堵塞
     # WSGIServer((service['listen'], int(service['port'])), app).serve_forever()
 
-    # 改用waitress WSGI
-    # from waitress import serve
-    # serve(app, host=service['listen'], port=int(service['port']))
-
-    # 内置 WSGI
-    from wsgiref.simple_server import make_server
-
-    server = make_server(service['listen'], int(service['port']), app)
-    server.serve_forever()
+    # 内置 WSGI, 容易被打挂,socket断开后不会释放
+    # from wsgiref.simple_server import make_server
+    #
+    # server = make_server(service['listen'], int(service['port']), app)
+    # server.serve_forever()
