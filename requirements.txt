@@ -3,5 +3,6 @@ flask
 # Python WSGI 方式1
 # gevent
 # Python WSGI 方式2
-# waitress
+waitress
 ddddocr
+Pillow==9.5.0
